@@ -2,7 +2,7 @@
 
 Vortext is a jQuery plugin that transforms text when you mouse over!
 
-[Demo](http://lakenen.com/vortext)
+[Demo](http://imbcmdth.github.com/vortext/examples/index.html)
 
 ## How to use
 
