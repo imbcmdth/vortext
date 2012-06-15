@@ -71,7 +71,8 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 			texts = getTextNodesIn(elt),
 			radius = options.radius,
 			multiply = options.multiply,
-			pt, lastPt, wordData, refreshPositionsTID;
+			pt, lastPt, wordData, refreshPositionsTID,
+			wordBVH = new njsBVH(2, 2); // 2 Dimensions, 2 nodes per leaf
 		
 		texts.each(function (i, text) {
 			$(text).replaceWith(text.textContent.replace(reg, '<span class="vortext">$1</span>'));
@@ -87,7 +88,8 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 		});
 		
 		wordData = getPositionData(wordElts);
-		
+		wordBVH.build(wordData, true); // Force pre-build
+
 		$(window).bind('mousemove touchmove',function (e) {
 			pt = getCoord(e.originalEvent);
 			if (isNaN(pt.x) || isNaN(pt.y)) {
@@ -103,6 +105,8 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 			clearTimeout(refreshPositionsTID);
 			refreshPositionsTID = setTimeout(function () {
 				wordData = getPositionData(wordElts);
+				wodBVH =  new njsBVH(2, 2);
+				wordBVH.build(wordData, true); // Force pre-build
 			}, 200);
 		});
 		
@@ -113,38 +117,39 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 		
 		function loop() {
 			if (pt && (!lastPt || (lastPt.x !== pt.x || lastPt.y !== pt.y))) {
+				if(!lastPt ) lastPt = pt;
+				var minX = Math.min(pt.x, lastPt.x);
+				var minY = Math.min(pt.y, lastPt.y);
+				var maxX = Math.max(pt.x, lastPt.x);
+				var maxY = Math.max(pt.y, lastPt.y);
+
+				var intervals = [ // search boundary must include radius around lastPt and pt
+					{a:minX - radius, b:(maxX - minX) + radius * 2},
+					{a:minY - radius, b:(maxY - minY) + radius * 2}
+				];
+
 				lastPt = pt;
-				var len = wordData.length,
-					data, dir, dist, mult, 
+				var words = wordBVH.search({intervals: intervals});
+				var len = words.length,
+					data, dir, dist, mult,
 					newX, newY, newA, newS;
+
 				for (var i = 0, l = len; i < l; ++i) {
-					data = wordData[i];
+					data = words[i].o;
 					dir	 = direction(pt, data),
 					dist = distance(pt, data),
 					mult = multiply * clamp(radius - dist, 0, radius),
-					newX = (Math.cos(dir) - Math.sin(dir)) * mult,
-					newY = (Math.sin(dir) + Math.cos(dir)) * mult,
+					sin_dir = Math.sin(dir),
+					cos_dir = Math.cos(dir),
+					newX = (cos_dir - sin_dir) * mult,
+					newY = (sin_dir + cos_dir) * mult,
 					newA = mult === 0 ? 0 : clamp(mult, 0, 1)*(dir+Math.PI/2),
 					newS = clamp(2*(1 + mult)/radius, 1, radius/2);
-					
-					if (newX === data.off.x && newY === data.off.y && 
-						newA === data.off.a && newS === data.off.s)
-					{
-						continue;
-					}
-					
 					setTransform(data.elt.get(0), newX, newY, newA, newS);
-					
-					data.off = {
-						x: newX,
-						y: newY,
-						a: newA, 
-						s: newS
-					};
 				}
 			}
 		}
-		
+
 		function getCoord(e) {
 			var off = elt.offset(),
 				pageX = e.pageX || e.touches && e.touches[0].pageX,
@@ -163,11 +168,15 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 	}
 	
 	function clamp(c, a, b) {
-		return (c < a ? a : c > b ? b : c);
+		// This might be faster..
+		return Math.max(a, Math.min(c, b));
+//		return (c < a ? a : c > b ? b : c);
 	}
 	
 	function distance(a, b) {
-		return Math.sqrt(Math.pow(a.x - b.x,2) + Math.pow(a.y - b.y,2));
+		var x = a.x - b.x;
+		var y = a.y - b.y;
+		return Math.sqrt( x * x + y * y );
 	}
 	
 	// direction from a TO b
@@ -204,13 +213,16 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 			var pos = word.position(),
 				w = word.width(), 
 				h = word.height(),
-				x = pos.left + w/2, 
-				y = pos.top + h/2;
+				x = pos.left, 
+				y = pos.top;
 			wordData.push({
-				elt: word,
-				y: y, x: x,
-				off: {
-					x: 0, y: 0, a: 0, s: 0
+				i:[{a:x, b:w},{a:y, b:h}], // Intervals in x, y (a=start coordinate, b=width)
+				o:{
+					elt: word,
+					x: x + w/2, y: y + h/2,
+					off: {
+						x: 0, y: 0, a: 0, s: 0
+					}
 				}
 			});
 		});
