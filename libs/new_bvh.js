@@ -8,12 +8,13 @@
 		var _T = null;  // The tree's root
 		this.i = null;  // The tree's "envelope" or AABB
 
-		var _kT = 10; // Cost per node-traversal
-		var _kI = 5; // Cost per intersection test
+		var _kT = 1; // Cost per node-traversal
+		var _kI = 1; // Cost per intersection test
 		// NOTE: A single constant _kT isn't really accurate because different types of objects have different 
 		// intersection costs (like spheres vs triangles). We just assume everything is a triangle.
 
-		var _kO = 1000; // Cost per node-traversal
+		var _kO = 1; // Cost bonus per non-overlapped nodes
+		var _kB = 0.5; // Cost savings for balanced nodes
 
 		// ALL nodes only have one-letter variables to save space in the event that the tree is serialized.
 		// TODO: Allow the tree to be serialized. :)
@@ -166,34 +167,38 @@
 			var overlap_width = left_plane - right_plane;
 			// When overlap <  0 the planes do not overlap
 
+			// When overlap <  0 the planes do not overlap
+			var doesOverlap = overlap_width > 0 ? true : false;
+			overlap_width = Math.abs(overlap_width);
+
 			while(t-->0) {
 				s = t - 1;
 				if(s < 0) s = _Dimensions - 1;
-				if(overlap_width > 0){
-					left_surface_area   += 2 * (t == number_of_axis ? left_AABB[t].b - overlap_width : left_AABB[t].b) 
-											 * (s == number_of_axis ? left_AABB[s].b - overlap_width : left_AABB[s].b);
-					right_surface_area  += 2 * (t == number_of_axis ? right_AABB[t].b - overlap_width: right_AABB[t].b) 
-											 * (s == number_of_axis ? right_AABB[s].b - overlap_width: right_AABB[s].b);
+				if(doesOverlap){
+					left_surface_area  += 2 * (t == number_of_axis ? left_AABB[t].b - overlap_width : left_AABB[t].b)
+											* (s == number_of_axis ? left_AABB[s].b - overlap_width : left_AABB[s].b);
+					right_surface_area += 2 * (t == number_of_axis ? right_AABB[t].b - overlap_width: right_AABB[t].b)
+											* (s == number_of_axis ? right_AABB[s].b - overlap_width: right_AABB[s].b);
 				} else {
-					left_surface_area   += 2 * left_AABB[t].b 
-											 * left_AABB[s].b;
-					right_surface_area  += 2 * right_AABB[t].b 
-											 * right_AABB[s].b;
+					left_surface_area  += 2 * left_AABB[t].b
+											* left_AABB[s].b;
+					right_surface_area += 2 * right_AABB[t].b
+											* right_AABB[s].b;
 				}
-				overlap_surface_area+= 2 * (t == number_of_axis ? overlap_width : left_AABB[t].b) 
-										 * (s == number_of_axis ? overlap_width : right_AABB[s].b);
+				overlap_surface_area   += 2 * (t == number_of_axis ? overlap_width : left_AABB[t].b) 
+										    * (s == number_of_axis ? overlap_width : right_AABB[s].b);
 			}
 
-			if(overlap_surface_area > 0)
+			if(doesOverlap)
 				var SAH = _kT + _kI * ( (left_surface_area/parent_surface_area)*left_count 
-						+ (right_surface_area/parent_surface_area)*right_count 
-						+ 2 * (overlap_surface_area/parent_surface_area)*(right_count+left_count)
-					);
+						  + (right_surface_area/parent_surface_area)*right_count 
+						  + (overlap_surface_area/parent_surface_area)*(right_count+left_count) );
 			else
 				var SAH = _kT + _kI * ( (left_surface_area/parent_surface_area)*left_count 
-						+ (right_surface_area/parent_surface_area)*right_count
-						+ (overlap_surface_area/parent_surface_area)*_kO
-					);
+						  + (right_surface_area/parent_surface_area)*right_count)
+						  - _kO * (overlap_surface_area/parent_surface_area)*(right_count+left_count);
+
+			if(Math.abs(right_count - left_count) <= 1) SAH *= _kB;
 
 			return SAH;
 		}
@@ -318,7 +323,7 @@
 		var _recursive_build = function(sorted_arrays_of_nodes, AABB){
 			var number_of_objects = sorted_arrays_of_nodes[0].length;
 
-			if(number_of_objects <= _Max_Leaf) return LeafNode(_make_MBV(sorted_arrays_of_nodes[0]), sorted_arrays_of_nodes[0]);
+			if(number_of_objects <= _Max_Leaf) return BoxNode(_make_MBV(sorted_arrays_of_nodes[0]), sorted_arrays_of_nodes[0]);
 			var final_nodes = [];
 
 			var sub_part_a = _build_subpart(sorted_arrays_of_nodes, AABB, []);
@@ -326,7 +331,7 @@
 
 			number_of_objects = sub_part_a.nodes[0][0].length;
 			if(number_of_objects <= _Max_Leaf) {
-					final_nodes.push(LeafNode(_make_MBV(sub_part_a.nodes[0][0]), sub_part_a.nodes[0][0]));
+					final_nodes.push(BoxNode(_make_MBV(sub_part_a.nodes[0][0]), sub_part_a.nodes[0][0]));
 			} else {
 				var sub_part_a_a = _build_subpart(sub_part_a.nodes[0], _make_MBV(sub_part_a.nodes[0][0]), excluded_axis);
 				excluded_axis.push(sub_part_a_a.axis);
@@ -336,7 +341,7 @@
 				} else {
 					number_of_objects = sub_part_a_a.nodes[0][0].length;
 					if(number_of_objects <= _Max_Leaf) {
-							final_nodes.push(LeafNode(_make_MBV(sub_part_a_a.nodes[0][0]), sub_part_a_a.nodes[0][0]));
+							final_nodes.push(BoxNode(_make_MBV(sub_part_a_a.nodes[0][0]), sub_part_a_a.nodes[0][0]));
 					} else {
 						var sub_part_a_a_a = _build_subpart(sub_part_a_a.nodes[0], _make_MBV(sub_part_a_a.nodes[0][0]), excluded_axis);
 						final_nodes.push(_recursive_build(sub_part_a_a_a.nodes[0], _make_MBV(sub_part_a_a_a.nodes[0][0])));
@@ -344,7 +349,7 @@
 					}
 					number_of_objects = sub_part_a_a.nodes[1][0].length;
 					if(number_of_objects <= _Max_Leaf) {
-							final_nodes.push(LeafNode(_make_MBV(sub_part_a_a.nodes[1][0]), sub_part_a_a.nodes[1][0]));
+							final_nodes.push(BoxNode(_make_MBV(sub_part_a_a.nodes[1][0]), sub_part_a_a.nodes[1][0]));
 					} else {
 						var sub_part_a_a_b = _build_subpart(sub_part_a_a.nodes[1],  _make_MBV(sub_part_a_a.nodes[1][0]), excluded_axis);
 						final_nodes.push(_recursive_build(sub_part_a_a_b.nodes[0], _make_MBV(sub_part_a_a_b.nodes[0][0])));
@@ -355,7 +360,7 @@
 			}
 			number_of_objects = sub_part_a.nodes[1][0].length;
 			if(number_of_objects <= _Max_Leaf) {
-					final_nodes.push(LeafNode(_make_MBV(sub_part_a.nodes[1][0]), sub_part_a.nodes[1][0]));
+					final_nodes.push(BoxNode(_make_MBV(sub_part_a.nodes[1][0]), sub_part_a.nodes[1][0]));
 			} else {
 				var sub_part_a_b = _build_subpart(sub_part_a.nodes[1], _make_MBV(sub_part_a.nodes[1][0]), excluded_axis);
 				excluded_axis.push(sub_part_a_b.axis);
@@ -365,7 +370,7 @@
 				} else {
 					number_of_objects = sub_part_a_b.nodes[0][0].length;
 					if(number_of_objects <= _Max_Leaf) {
-							final_nodes.push(LeafNode(_make_MBV(sub_part_a_b.nodes[0][0]), sub_part_a_b.nodes[0][0]));
+							final_nodes.push(BoxNode(_make_MBV(sub_part_a_b.nodes[0][0]), sub_part_a_b.nodes[0][0]));
 					} else {
 							var sub_part_a_b_a = _build_subpart(sub_part_a_b.nodes[0],  _make_MBV(sub_part_a_b.nodes[0][0]), excluded_axis);
 							final_nodes.push(_recursive_build(sub_part_a_b_a.nodes[0], _make_MBV(sub_part_a_b_a.nodes[0][0])));
@@ -374,7 +379,7 @@
 
 					number_of_objects = sub_part_a_b.nodes[1][0].length;
 					if(number_of_objects <= _Max_Leaf) {
-							final_nodes.push(LeafNode(_make_MBV(sub_part_a_b.nodes[1][0]), sub_part_a_b.nodes[1][0]));
+							final_nodes.push(BoxNode(_make_MBV(sub_part_a_b.nodes[1][0]), sub_part_a_b.nodes[1][0]));
 					} else {
 							var sub_part_a_b_b = _build_subpart(sub_part_a_b.nodes[1],  _make_MBV(sub_part_a_b.nodes[1][0]), excluded_axis);
 							final_nodes.push(_recursive_build(sub_part_a_b_b.nodes[0], _make_MBV(sub_part_a_b_b.nodes[0][0])));
@@ -390,7 +395,7 @@
 			var AABB = unfinished_node.i;
 			var number_of_objects = sorted_arrays_of_nodes[0].length;
 
-			if(number_of_objects <= _Max_Leaf) return LeafNode(_make_MBV(sorted_arrays_of_nodes[0]), sorted_arrays_of_nodes[0]);
+			if(number_of_objects <= _Max_Leaf) return BoxNode(_make_MBV(sorted_arrays_of_nodes[0]), sorted_arrays_of_nodes[0]);
 			var final_nodes = [];
 
 			var sub_part_a = _build_subpart(sorted_arrays_of_nodes, AABB, []);
@@ -398,7 +403,7 @@
 
 			number_of_objects = sub_part_a.nodes[0][0].length;
 			if(number_of_objects <= _Max_Leaf) {
-					final_nodes.push(LeafNode(_make_MBV(sub_part_a.nodes[0][0]), sub_part_a.nodes[0][0]));
+					final_nodes.push(BoxNode(_make_MBV(sub_part_a.nodes[0][0]), sub_part_a.nodes[0][0]));
 			} else {
 				var sub_part_a_a = _build_subpart(sub_part_a.nodes[0], _make_MBV(sub_part_a.nodes[0][0]), do_axis);
 				if(!use8WayNodes){
@@ -407,7 +412,7 @@
 				} else {
 					number_of_objects = sub_part_a_a.nodes[0][0].length;
 					if(number_of_objects <= _Max_Leaf) {
-							final_nodes.push(LeafNode(_make_MBV(sub_part_a_a.nodes[0][0]), sub_part_a_a.nodes[0][0]));
+							final_nodes.push(BoxNode(_make_MBV(sub_part_a_a.nodes[0][0]), sub_part_a_a.nodes[0][0]));
 					} else {
 						var sub_part_a_a_a = _build_subpart(sub_part_a_a.nodes[0], _make_MBV(sub_part_a_a.nodes[0][0])/*, excluded_axis*/);
 						final_nodes.push(UnfinishedNode(_make_MBV(sub_part_a_a_a.nodes[0][0]), sub_part_a_a_a.nodes[0]));
@@ -415,7 +420,7 @@
 					}
 					number_of_objects = sub_part_a_a.nodes[1][0].length;
 					if(number_of_objects <= _Max_Leaf) {
-							final_nodes.push(LeafNode(_make_MBV(sub_part_a_a.nodes[1][0]), sub_part_a_a.nodes[1][0]));
+							final_nodes.push(BoxNode(_make_MBV(sub_part_a_a.nodes[1][0]), sub_part_a_a.nodes[1][0]));
 					} else {
 						var sub_part_a_a_b = _build_subpart(sub_part_a_a.nodes[1],  _make_MBV(sub_part_a_a.nodes[1][0])/*, excluded_axis*/);
 						final_nodes.push(UnfinishedNode(_make_MBV(sub_part_a_a_b.nodes[0][0]), sub_part_a_a_b.nodes[0]));
@@ -425,7 +430,7 @@
 			}
 			number_of_objects = sub_part_a.nodes[1][0].length;
 			if(number_of_objects <= _Max_Leaf) {
-					final_nodes.push(LeafNode(_make_MBV(sub_part_a.nodes[1][0]), sub_part_a.nodes[1][0]));
+					final_nodes.push(BoxNode(_make_MBV(sub_part_a.nodes[1][0]), sub_part_a.nodes[1][0]));
 			} else {
 				var sub_part_a_b = _build_subpart(sub_part_a.nodes[1], _make_MBV(sub_part_a.nodes[1][0]), do_axis);
 				if(!use8WayNodes){
@@ -434,7 +439,7 @@
 				} else {
 					number_of_objects = sub_part_a_b.nodes[0][0].length;
 					if(number_of_objects <= _Max_Leaf) {
-							final_nodes.push(LeafNode(_make_MBV(sub_part_a_b.nodes[0][0]), sub_part_a_b.nodes[0][0]));
+							final_nodes.push(BoxNode(_make_MBV(sub_part_a_b.nodes[0][0]), sub_part_a_b.nodes[0][0]));
 					} else {
 							var sub_part_a_b_a = _build_subpart(sub_part_a_b.nodes[0],  _make_MBV(sub_part_a_b.nodes[0][0])/*, excluded_axis*/);
 							final_nodes.push(UnfinishedNode(_make_MBV(sub_part_a_b_a.nodes[0][0]), sub_part_a_b_a.nodes[0]));
@@ -443,7 +448,7 @@
 
 					number_of_objects = sub_part_a_b.nodes[1][0].length;
 					if(number_of_objects <= _Max_Leaf) {
-							final_nodes.push(LeafNode(_make_MBV(sub_part_a_b.nodes[1][0]), sub_part_a_b.nodes[1][0]));
+							final_nodes.push(BoxNode(_make_MBV(sub_part_a_b.nodes[1][0]), sub_part_a_b.nodes[1][0]));
 					} else {
 							var sub_part_a_b_b = _build_subpart(sub_part_a_b.nodes[1],  _make_MBV(sub_part_a_b.nodes[1][0])/*, excluded_axis*/);
 							final_nodes.push(UnfinishedNode(_make_MBV(sub_part_a_b_b.nodes[0][0]), sub_part_a_b_b.nodes[0]));
@@ -653,11 +658,11 @@
 					}
 
 					if (_overlap_intervals(intervals, ltree.i)) {
-						if ("n" in ltree) { // Not a Leaf
+						if (ltree.n) { // Not a Leaf
 							parent_stack.push(ltree);
-						} else if ("o" in ltree) { // A Leaf !!
-//							return_array.push(ltree.o);
-							return_array = return_array.concat(ltree.o);
+						} else if (ltree.o) { // A Leaf !!
+							return_array.push(ltree.o);
+//							return_array = return_array.concat(ltree.o);
 						}
 					}
 				}
